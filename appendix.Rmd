@@ -1,0 +1,214 @@
+---
+title: "Untitled"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data and package loading
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(funModeling)
+library(Hmisc)
+library(MASS)
+library(magrittr)
+library(ggplot2)
+library(easyGgplot2)
+library(reshape2)
+library(Matrix)
+library(lme4)
+library(arm)
+library(merTools)
+library(sjstats)
+library(HLMdiag)
+us_accident <- read.csv("US_Accidents_June20.csv")
+```
+
+## Data cleaning
+
+```{r}
+#select possible related variables
+us_accident1 <- dplyr::select(us_accident,Severity,City,County,State,Weather_Timestamp,Weather_Condition,Temperature.F.,Wind_Chill.F.,Humidity...,Visibility.mi.,Wind_Speed.mph.,Precipitation.in.,Traffic_Signal,Civil_Twilight)
+#split year month of the data to check whether it contains all the data
+us_accident2 <- separate(us_accident1,Weather_Timestamp, c("year","month","day"), sep = "-")
+us_accident3 <- filter(us_accident2, year == "2019")
+#check na of variables
+df_status(us_accident3)
+#re-select dataset delete na value
+new_us_accident <- dplyr::select(us_accident3,Severity,City,County,State,Weather_Condition,Temperature.F.,Humidity...,Visibility.mi.,Traffic_Signal,Civil_Twilight)
+#delete na values
+new_us_accident <- na.omit(new_us_accident)
+#check whether dataset is clean or not
+unique(new_us_accident$Temperature.F.)
+unique(new_us_accident$Civil_Twilight)
+unique(new_us_accident$Traffic_Signal)
+unique(new_us_accident$Humidity...)
+#find index for "" row of Civil_Twilight
+space_index <- which(new_us_accident$Civil_Twilight == "")
+#delete the observations rows where Civil_Twilight == ""
+new_data <- new_us_accident[-c(space_index),,drop=F]
+#counts of weather condition
+freq(new_data$Weather_Condition)
+#select top 6 weather conditions
+index1 <- which(new_data$Weather_Condition == "Fair")
+index2 <- which(new_data$Weather_Condition == "Mostly Cloudy")
+index3 <- which(new_data$Weather_Condition == "Cloudy")
+index4 <- which(new_data$Weather_Condition == "Partly Cloudy")
+index5 <- which(new_data$Weather_Condition == "Clear")
+index6 <- which(new_data$Weather_Condition == "Overcast")
+index7 <- which(new_data$Weather_Condition == "Light Rain")
+index8 <- c(index1,index2,index3,index4,index5,index6,index7)
+severity_data <- new_data[index8,]
+```
+
+## Simple EDA
+
+```{r}
+#count for severity of total observations
+ggplot2.barplot(data = severity_data, xName = "Severity", yNmae = "frequency",
+                backgroundColor="white", fill='lightblue', color="lightblue",
+                xtitle = "Severity", ytitle= "Counts")
+#count for travel signal
+ggplot2.barplot(data = severity_data, xName = "Traffic_Signal", yNmae = "frequency",
+                backgroundColor="white", fill='lightblue', color="lightblue",
+                xtitle = "Travel Signal", ytitle= "Counts")
+#count for civil twilight
+ggplot2.barplot(data = severity_data, xName = "Civil_Twilight", yNmae = "frequency",
+                backgroundColor="white", fill='lightblue', color="lightblue",
+                xtitle = "civil twilight", ytitle= "Counts")
+#range of continuous variable
+range(severity_data$Temperature.F.)
+range(severity_data$Humidity...)
+range(severity_data$Visibility.mi.)
+#severity and temperature
+sev <- severity_data$Severity[1:4000]
+tem <- new_data$Temperature.F.[1:4000]
+df1 <- data.frame(sev,tem)
+g1 <- ggplot(df1, aes(tem,sev))
+g1 + geom_jitter(width = 0.5, size =0.2) +
+  labs(subtitle = "Severity with tem", x ="tem", y = "severity", title = "jittered points")
+#severity and visiblity
+sev <- new_data$Severity[1:4000]
+vis <- new_data$Visibility.mi[1:4000]
+df2 <- data.frame(sev,vis)
+g2 <- ggplot(df2, aes(vis,sev))
+g2 + geom_jitter(width = 0.5, size =0.2) +
+  labs(subtitle = "Severity with tem", x ="vis", y = "severity", title = "jittered points")
+#severity and traffic signal
+traffic <- severity_data$Traffic_Signal[1:4000]
+sev <- severity_data$Severity[1:4000]
+df3 <- data.frame(sev,traffic)
+g3 <- ggplot(df3, aes(traffic,sev))
+g3 + geom_jitter(width = 0.5, size =0.2) +
+  labs(subtitle = "Severity with traffic signal", x ="travel signal", y = "severity", title = "jittered points")
+#severity and civil twilight
+light <- severity_data$Civil_Twilight[1:4000]
+df4 <- data.frame(sev,light)
+g4 <- ggplot(df4, aes(light,sev))
+g4 + geom_jitter(width = 0.5, size =0.2) +
+  labs(subtitle = "Severity with civil twilight", x ="twilight", y = "severity", title = "jittered points")
+```
+
+## Fit model
+
+```{r}
+##Model fit
+##HLM
+#fit the empty model
+fit_empty <- lmer(Severity ~ (1|State), data = severity_data)
+#intraclass correlation coefficient
+sjstats::icc(fit_empty)
+#random intercept models
+fita <- lmer(Severity ~ Humidity... + Temperature.F. + Visibility.mi. + Traffic_Signal + Civil_Twilight + Weather_Condition + (1|State), data = severity_data)
+summary(fita)
+confint(fita)
+#plot the interval estimates
+plotREsim(REsim(fita))
+binnedplot(predict(fita),resid(fita))
+#with interaction
+fitd <- lmer(Severity ~ Humidity... + Temperature.F. + Visibility.mi. + Traffic_Signal + Civil_Twilight + Weather_Condition + Humidity...:Visibility.mi.  + (1|State),  data = severity_data)
+summary(fitd)
+binnedplot(predict(fitd),resid(fitd))
+AIC(fita,fitd)
+#random slope models
+fita1 <- lmer(Severity ~ Humidity... + Temperature.F. + Visibility.mi. + Civil_Twilight + Weather_Condition + (Traffic_Signal|State), data = severity_data)
+plotREsim(REsim(fita1))
+AIC(fita1)
+binnedplot(predict(fita1),resid(fita1))
+fita2 <- lmer(Severity ~ Humidity... + Temperature.F. + Visibility.mi. + Traffic_Signal + Weather_Condition + ( Civil_Twilight|State), data = severity_data)
+plotREsim(REsim(fita2))
+binnedplot(predict(fita2),resid(fita2))
+AIC(fita1,fita2)
+anova(fita,fitd,fita1,fita2)
+```
+
+```{r}
+#ordinal logistic regression
+#fit1
+fit1 <- polr(as.factor(Severity) ~ Humidity... + Temperature.F. + Visibility.mi.+ as.factor(Weather_Condition) , data = severity_data, Hess=TRUE)
+summary(fit1)
+coef_fit1 <- coef(summary(fit1))
+pval <- pnorm(abs(coef_fit1[, "t value"]),lower.tail = FALSE)* 2
+coef_fit1 <- cbind(coef_fit1, "p value" = pval)
+coef_fit1
+head(predict(fit1,severity_data,type = "p"))
+#fit2
+fit2 <- polr(as.factor(Severity) ~ as.factor(Traffic_Signal) + as.factor(Civil_Twilight), data = severity_data, Hess=TRUE)
+summary(fit2)
+coef_fit2 <- coef(summary(fit2))
+pval2 <- pnorm(abs(coef_fit2[, "t value"]),lower.tail = FALSE)* 2
+coef_fit2 <- cbind(coef_fit2, "p value" = pval2)
+coef_fit2
+predx<- expand.grid(Traffic_Signal=c("True","False"),Civil_Twilight=c("Day","Night"))
+predy<- predict (fit2,newdata=predx,type = "p")
+ggplot(melt(cbind(predx,predy),id.vars = c("Traffic_Signal","Civil_Twilight")))+
+  geom_bar(stat="identity")+aes(Civil_Twilight,y=value, fill=variable)+
+  facet_grid(~Traffic_Signal)
+#fit3
+fit3 <- polr(as.factor(Severity) ~ Visibility.mi. + as.factor(Traffic_Signal) + as.factor(Civil_Twilight) + Humidity... + Temperature.F., data = severity_data, Hess=TRUE)
+summary(fit3)
+coef_fit3 <- coef(summary(fit3))
+pval3 <- pnorm(abs(coef_fit3[, "t value"]),lower.tail = FALSE)* 2
+coef_fit3 <- cbind(coef_fit3, "p value" = pval3)
+coef_fit3
+#fit4
+fit4 <- polr(as.factor(Severity) ~ as.factor(Weather_Condition) + Visibility.mi. + as.factor(Traffic_Signal) + as.factor(Civil_Twilight) + Humidity... + Temperature.F., data = severity_data, Hess=TRUE)
+summary(fit4)
+coef_fit4 <- coef(summary(fit4))
+pval4 <- pnorm(abs(coef_fit4[, "t value"]),lower.tail = FALSE)* 2
+coef_fit4 <- cbind(coef_fit4, "p value" = pval4)
+coef_fit4
+residuals(fit1)
+#fit5
+fit5 <- polr(as.factor(Severity) ~ as.factor(Weather_Condition) + Visibility.mi. + as.factor(Traffic_Signal) + as.factor(Civil_Twilight) + Humidity... *Temperature.F. + Temperature.F., data = severity_data, Hess=TRUE)
+summary(fit5)
+coef_fit5 <- coef(summary(fit5))
+pval5 <- pnorm(abs(coef_fit5[, "t value"]),lower.tail = FALSE)* 2
+coef_fit5 <- cbind(coef_fit5, "p value" = pval5)
+coef_fit5
+head(predict(fit5,severity_data,type = "p"))
+fit6 <- polr(as.factor(Severity) ~ as.factor(Weather_Condition) + Visibility.mi. + as.factor(Traffic_Signal) + as.factor(Civil_Twilight) + Humidity... *Visibility.mi. + Temperature.F., data = severity_data, Hess=TRUE)
+AIC(fit1,fit2,fit3,fit4,fit5,fit6)
+```
+##Package reference
+dplyr: https://cran.r-project.org/web/packages/dplyr/index.html
+tidyr: https://cran.r-project.org/web/packages/tidyr/index.html
+funModeling: https://cran.r-project.org/web/packages/funModeling/index.html
+Hmisc: https://cran.r-project.org/web/packages/Hmisc/index.html
+MASS: https://cran.r-project.org/web/packages/MASS/index.html
+magrittr: https://cran.r-project.org/web/packages/magrittr/index.html
+ggplot2: https://cran.r-project.org/web/packages/ggplot2/index.html
+easyGgplot2: https://github.com/kassambara/easyGgplot2
+reshape2: https://cran.r-project.org/web/packages/reshape2/index.html
+Matrix: https://cran.r-project.org/web/packages/Matrix/index.html
+lme4: https://cran.r-project.org/web/packages/lme4/index.html
+arm: https://cran.r-project.org/web/packages/arm/index.html
+sjstats: https://cran.r-project.org/web/packages/sjstats/index.html
+HLMdiag: https://cran.r-project.org/web/packages/HLMdiag/index.html
